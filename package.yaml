@@ -1,0 +1,61 @@
+name:                fe-image
+version:             0.1.0.0
+github:              "diqye/fe-image"
+license:             BSD3
+author:              "diqye"
+maintainer:          "262666212@qq.com"
+copyright:           "copyright"
+
+extra-source-files:
+- README.md
+- ChangeLog.md
+
+# Metadata used when publishing your package
+# synopsis:            Short description of your package
+# category:            Web
+
+# To avoid duplicated efforts in documentation and dealing with the
+# complications of embedding Haddock markup inside cabal files, it is
+# common to point users to the README.md file.
+description:         Please see the README on GitHub at <https://github.com/diqye/fe-image#readme>
+
+dependencies:
+- base >= 4.7 && < 5
+- aeson
+- scientific
+- unordered-containers
+- yaml
+- text
+- bytestring
+- transformers
+- directory
+- http-client
+- http-client-tls
+- neat-interpolation
+- filepath
+- base64-bytestring
+
+library:
+  source-dirs: src
+
+executables:
+  fe-image-exe:
+    main:                Main.hs
+    source-dirs:         app
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - fe-image
+
+tests:
+  fe-image-test:
+    main:                Spec.hs
+    source-dirs:         test
+    ghc-options:
+    - -threaded
+    - -rtsopts
+    - -with-rtsopts=-N
+    dependencies:
+    - fe-image
