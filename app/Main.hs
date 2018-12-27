@@ -29,6 +29,7 @@ import qualified Data.Aeson as A
 import qualified Data.HashMap.Lazy as HM
 import Data.Scientific(Scientific)
 import Control.Concurrent
+import Network.HTTP.Client.MultipartFormData(partFileSource,formDataBody)
 
 
 
@@ -36,7 +37,7 @@ data ConfKey = ConfKey { ck_key :: String
                        , ck_name :: String
                        , ck_email :: String
                        } deriving Show
-data ConfUpload = ConfUpload { cu_key :: String
+data ConfUpload = ConfUpload { cu_api :: String
                              } deriving Show
 data Config = Config { c_api :: String
                      , c_keys :: [ConfKey]
@@ -55,7 +56,7 @@ instance Y.FromJSON ConfKey where
 
 instance Y.FromJSON ConfUpload where
   parseJSON = Y.withObject "upload" $ \v -> 
-    pure ConfUpload <*> v .: "key"
+    pure ConfUpload <*> v .: "api"
 
 instance Y.FromJSON Config where
   parseJSON = Y.withObject "config" $ \v -> do
@@ -79,9 +80,9 @@ cmdHelp = CmdHelp $ T.unpack $ [text|
 
 output目录 ./fe-output/
 
-imagekit path               仅压缩 
-imagekit --cUpload path     压缩并上传 
-imagekit --onlyUpload path  仅上传
+fx-image path               仅压缩 
+fx-image --cUpload path     压缩并上传 
+fx-image --onlyUpload path  仅上传
   |]
 
 main :: IO ()
@@ -104,17 +105,24 @@ myprintStr = liftIO . putStrLn
 dologic :: MaybeT IO ()
 dologic = do
   cmdArg <- parsingCmd
-  myprint cmdArg
   myprintStr "1. 解析yaml配置"
   config <- parsingConfig
-  -- myprint config
   myprintStr "2. 压缩图片"
   let api = c_api config
   let ckeys = c_keys config
   compress <- compressImg api ckeys cmdArg
   myprintStr "3. 上传图片"
-  url <- uploadImg compress
-  myprint (compress,url)
+  let uploadApi = cu_api $ c_upload $ config
+  url <- uploadImg compress uploadApi
+  appendFileLogic "fe-output/output.log" (compress,url)
+
+appendFileLogic :: String -> ((String,String),String) -> MaybeT IO ()
+appendFileLogic path ((origin,target),url) = MaybeT $ do
+  let msg =  origin ++ ">压缩后>" ++ target ++ ">上传后>" ++ url ++ "\n"
+  appendFile path msg
+  putStrLn $ "写入文件:" ++ path
+  putStrLn $ "成功:" ++ msg
+  return mzero
 
 parsingCmd :: MaybeT IO CmdArg
 parsingCmd = MaybeT $ do
@@ -129,8 +137,12 @@ parsingCmd = MaybeT $ do
         logicfn [path] = createWith path CmdZip
         logicfn _ = printCmd cmdHelp >> return Nothing
 
-        createWith path construct = fmap toMaybe getCurrentDirectory
-          where toMaybe = Just . construct . (</> path)
+        createWith ('~':_:path) construct = do
+          homePath <- getHomeDirectory
+          return $ Just $ construct $ homePath </> path
+        createWith path construct = do
+          currPath <- getCurrentDirectory
+          return $ Just $ construct $ currPath </> path
 
 parsingConfig :: MaybeT IO Config
 parsingConfig = MaybeT $ do
@@ -197,8 +209,7 @@ compressImg' api ckey cmdArg   = MaybeT $ do
                       return $ [text|
                         原文件  : $tpath
                         压缩比例: $tratio %
-                        输出文件: $trv
-                       |]
+                        输出文件: $trv |]
       case mratio of Just msg -> putStrLn $ T.unpack msg
                      Nothing  -> LC.putStrLn body
       return compressPath
@@ -221,15 +232,35 @@ jsonv = A.decode  "{\"input\":{\"size\":13960,\"type\":\"image/png\"},\"output\"
 
 getObject :: T.Text -> A.Value -> Maybe A.Value
 getObject key (A.Object o) = HM.lookup key o
-getObject _ _= Nothing
+getObject _ _= mzero
 
 getNumber :: T.Text -> A.Value -> Maybe Scientific
 getNumber  key (A.Object o) = do
   v <- HM.lookup key o
   case v of A.Number o -> return o
             _ -> mzero
+getNumber _ _= mzero
 
-uploadImg :: CompressInfo -> MaybeT IO String
-uploadImg _ = do
-  myprintStr "未做"
-  mzero
+getString :: T.Text -> A.Value -> Maybe String
+getString  key (A.Object o) = do
+  v <- HM.lookup key o
+  case v of A.String o -> return $ T.unpack $ o
+            _ -> mzero
+getString _ _ = mzero
+
+uploadImg :: CompressInfo -> String -> MaybeT IO String
+uploadImg (originFile,targetFile) api = MaybeT up1
+ where up1 :: IO (Maybe String)
+       up1 = do
+               manager <- newManager tlsManagerSettings
+               request <- parseRequest api
+               rq <- formDataBody [partFileSource "diqyefile" targetFile] $ request { method = "POST" }
+               res <- httpLbs rq manager
+               let body = responseBody $ res
+               -- LC.putStrLn body
+               let bodyMaybeV = A.decode body
+               let murl = do
+                    json <- bodyMaybeV
+                    r <- getString "data" json
+                    return r
+               return murl
