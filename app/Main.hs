@@ -114,6 +114,7 @@ dologic = do
   myprintStr "3. 上传图片"
   let uploadApi = cu_api $ c_upload $ config
   url <- uploadImg compress uploadApi
+  liftIO $ createDirectoryIfMissing False "fe-output"
   appendFileLogic "fe-output/output.log" (compress,url)
 
 appendFileLogic :: String -> ((String,String),String) -> MaybeT IO ()
